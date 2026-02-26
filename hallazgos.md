@@ -13,243 +13,153 @@
 | 11  | DIP débil: AuthService depende de clase concreta UserRepository        | AuthService.java        | 12                      | SOLID (DIP)                                             | Bajo/Medio |
 | 12  | Secretos en application.properties incluyendo target/classes           | resources/\*.properties | —                       | Seguridad (secrets), Build hygiene                      | Medio      |
 
-
+---
 
 # 📄 **FASE 3 — Pruebas Funcionales (Resultados y Análisis)**
 
-*Proyecto: LoginCaos — Auditoría Técnica*  
-*Autor: Sebastián Puentes González*  
-*Fecha:* {{FECHA}}
-
+**Proyecto:** LoginCaos — Auditoría Técnica  
+**Autor:** Sebastián Puentes González  
 ***
 
-## 🧪 **Prueba 1 — Login válido**
+# 🧪 **Prueba 1 — Login válido**
 
-### ✔ **Descripción**
+### ✔ **Comando ejecutado**
 
-Se verifica que el login funcione con credenciales correctas y se analiza si la respuesta expone información sensible.
+    POST http://localhost:8080/login?u=admin&p=12345
 
-***
+### 📸 **Evidencia**
 
-### 📝 **Comando ejecutado**
+![Prueba #1](img/prueba-1.png)
 
-```http
-POST http://localhost:8080/login?u=admin&p=12345
-```
-
-***
-
-### 📸 **Evidencia (respuesta Postman)**
-
-> *Inserta aquí tu imagen*
-
-    ./imagenes/login_valido_response.png
-
-***
-
-### 📸 **Evidencia (logs de servidor)**
-
-> *Inserta aquí tu imagen*
-
-    ./imagenes/login_valido_logs.png
-
-***
+*(La imagen muestra Postman con usuario `admin`, password `12345` y respuesta 200 OK)*
 
 ### ✅ **Resultado observado**
 
-*   El servidor retorna:
-    ```json
-    {
-      "ok": true,
-      "user": "admin",
-      "hash": "827ccb0eea8a706c4c34a16891f84e7b"
-    }
-    ```
-*   Status HTTP: **200 OK**
+El servidor responde:
 
-***
+```json
+{
+  "ok": true,
+  "user": "admin",
+  "hash": "827ccb0eea8a706c4c34a16891f84e7b"
+}
+```
 
 ### ⚠ **Datos sensibles expuestos**
 
-| Dato                          | Nivel de riesgo | Motivo                                                     |
-| ----------------------------- | --------------- | ---------------------------------------------------------- |
-| `user` (“admin”)              | Medio           | Permite **enumeración de usuarios**                        |
-| `hash` (MD5 de la contraseña) | **Crítico**     | Exposición directa del hash → Puede crackearse en segundos |
+| Dato expuesto             | Riesgo      | Motivo                                            |
+| ------------------------- | ----------- | ------------------------------------------------- |
+| Nombre de usuario         | Medio       | Permite enumeración de usuarios                   |
+| Hash MD5 de la contraseña | **Crítico** | MD5 es vulnerable a fuerza bruta y rainbow tables |
 
-***
-
-### ❌ **¿Debería devolverse esta información?**
+### ❌ **¿Debería mostrarse esa información?**
 
 No.  
-El hash nunca debe enviarse al cliente.  
-La respuesta debería limitarse a:
-
-```json
-{ "ok": true }
-```
-
-O (idealmente) un **JWT o token de sesión**, pero **nunca** información derivada de la contraseña.
-
-***
+Un login correcto debería devolver **solo un token**, nunca el hash de la contraseña.
 
 ***
 
 # 💣 **Prueba 2 — SQL Injection**
 
-### ✔ **Descripción**
+### ✔ **Comando ejecutado**
 
-Evalúa si el endpoint es vulnerable a inyección SQL manipulando el parámetro `u`.
+    POST http://localhost:8080/login?u=admin'--&p=cualquiercosa
 
-***
+### 📸 **Evidencia**
 
-### 📝 **Comando ejecutado**
+![Prueba #2](img/prueba-2.png)
 
-```http
-POST http://localhost:8080/login?u=admin'--&p=cualquiercosa
+La imagen muestra:
+
+```json
+{
+  "ok": false,
+  "hash": "173825908435031241b7e1cb1502409641"
+}
 ```
-
-***
-
-### 📸 **Evidencia (respuesta Postman)**
-
-> *Inserta aquí tu imagen*
-
-    ./imagenes/sql_injection_response.png
-
-***
-
-### 📸 **Evidencia (logs del servidor)**
-
-> *Inserta aquí tu imagen*
-
-    ./imagenes/sql_injection_logs.png
-
-***
 
 ### ✅ **Resultado observado**
 
-*   La consulta generada es:
-
-```sql
-select username, email, password 
-from users 
-where username = 'admin'--'
-```
-
-El comentario (`--`) **modifica completamente la consulta**, permitiendo omitir contenido crítico.
-
-*   El sistema:
-    *   Sí encuentra al usuario `admin`
-    *   Compare el hash MD5 de "cualquiercosa"
-    *   El login falla, pero la inyección **fue exitosa**
-
-***
+*   La consulta SQL queda truncada por el `--`
+*   Aunque la contraseña enviada es incorrecta, la inyección **se ejecuta**
+*   El sistema revela el **hash resultante**, permitiendo ataques de fuerza bruta
 
 ### ⚠ **Por qué es extremadamente peligroso**
 
-| Riesgo                        | Impacto                                                                    |
-| ----------------------------- | -------------------------------------------------------------------------- |
-| Manipulación de consultas SQL | Un atacante puede alterar la lógica de autenticación                       |
-| Filtración de información     | Puede leer datos de usuarios                                               |
-| Manipulación de datos         | En combinación con el endpoint `/register`, permite inyecciones más graves |
-| Ataques escalados             | Puede causar borrado masivo, extracción de credenciales o RCE              |
+| Riesgo                | Impacto                                        |
+| --------------------- | ---------------------------------------------- |
+| Alterar consultas     | Se ignora la contraseña                        |
+| Exfiltración de datos | Se exponen hashes, usuarios, etc.              |
+| Escalamiento          | Posibilidad de obtener acceso a cuentas reales |
+| Compromiso total      | Puede permitir modificar o borrar datos        |
 
-***
-
-### ❗ **Conclusión**
-
-El endpoint `/login` es **vulnerable a SQL Injection**, lo cual representa una amenaza crítica en entornos productivos.
-
-***
+**Conclusión:** El sistema es vulnerable a SQL Injection en producción.
 
 ***
 
 # 🧪 **Prueba 3 — Registro con contraseña débil**
 
-### ✔ **Descripción**
-
-Se valida si la API permite crear usuarios con contraseñas inseguras.
-
 ***
 
-## 🔽 **Prueba A — Contraseña “123”**
+## 🔽 **A. Contraseña “123”**
 
-### 📝 **Comando**
+### ✔ **Comando**
 
-```http
-POST http://localhost:8080/register?u=test&p=123&e=test@test.com
-```
+    POST http://localhost:8080/register?u=test&p=123&e=test@test.com
 
 ### 📸 **Evidencia**
 
-    ./imagenes/registro_p123.png
+![Prueba #3](img/prueba-3.png)
 
-### 🧩 **Resultado**
+### Resultado:
 
-*   Respuesta:
-    ```json
-    { "ok": false }
-    ```
-*   La API **rechaza** la contraseña porque mide 3 caracteres y la regla actual es:
-    ```java
-    p.length() > 3
-    ```
+```json
+{ "ok": false }
+```
+
+🔎 La API rechaza la contraseña por medir solo 3 caracteres.
 
 ***
 
-## 🔽 **Prueba B — Contraseña “1234”**
+## 🔽 **B. Contraseña “1234”**
 
-### 📝 **Comando**
+### ✔ **Comando**
 
-```http
-POST http://localhost:8080/register?u=test&p=1234&e=test@test.com
-```
+    POST http://localhost:8080/register?u=test&p=1234&e=test@test.com
 
 ### 📸 **Evidencia**
 
-    ./imagenes/registro_p1234.png
+![Prueba #3 cambiocontraseña](img/prueba-3.2.png)
 
-### 🧩 **Resultado**
+### Resultado:
 
-*   Respuesta:
-    ```json
-    {
-      "ok": true,
-      "user": "test"
-    }
-    ```
-*   La API **acepta** la contraseña porque tiene **4 caracteres**, suficiente según la validación actual.
+```json
+{
+  "ok": true,
+  "user": "test"
+}
+```
 
-***
-
-## 📌 **Conclusión de la Prueba 3**
-
-| Contraseña | Resultado   | ¿Correcto? | Comentario                      |
-| ---------- | ----------- | ---------- | ------------------------------- |
-| `123`      | ❌ Rechazada | ✔          | Validación mínima               |
-| `1234`     | ✔ Aceptada  | ❌          | Contraseña extremadamente débil |
-
-### ⚠ Validación actual NO es suficiente
-
-Tu API **no valida nada más** que longitud > 3.  
-No exige:
-
-*   Longitud mínima adecuada (8+)
-*   Mezcla de mayúsculas / minúsculas
-*   Caracter especial
-*   Un número
-*   No estar en lista de contraseñas comunes
-*   Hash seguro (solo usa MD5)
-*   Salt criptográfico
-*   Validación de email
-*   Validación de usuario duplicado
+🔎 Se acepta porque cumple el mínimo actual (`> 3` caracteres).
 
 ***
 
-# 🔚 **Resumen final de la FASE 3**
+## 📌 **Conclusión de la prueba 3**
 
-| Prueba               | Resultado                        | Riesgo      |
-| -------------------- | -------------------------------- | ----------- |
-| **Login válido**     | Expone hash MD5 y nombre usuario | **Crítico** |
-| **SQL Injection**    | La consulta es alterada          | **Crítico** |
-| **Contraseña débil** | Acepta contraseñas inseguras     | **Alto**    |
+| Contraseña | Aceptada | ¿Es adecuado? | Comentario                      |
+| ---------- | -------- | ------------- | ------------------------------- |
+| `123`      | ❌ No     | ✔             | Mínimo de 4 caracteres          |
+| `1234`     | ✔ Sí     | ❌             | Contraseña extremadamente débil |
+
+La validación **no es suficiente**.  
+No exige robustez, ni complejidad, ni evita claves comunes.
+
+***
+
+# 📄 **Resumen general de la FASE 3**
+
+| Prueba         | Resultado                               | Nivel de riesgo |
+| -------------- | --------------------------------------- | --------------- |
+| Login válido   | Exposición de hash MD5 y usuario        | **Crítico**     |
+| SQL Injection  | Inyección exitosa, información filtrada | **Crítico**     |
+| Registro débil | Acepta contraseñas inseguras            | Alto            |
